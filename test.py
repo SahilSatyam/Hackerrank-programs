@@ -294,61 +294,84 @@ def test_dataframe_wraper_success_response(client, mocker) -> None:
 ########################################################################################################
 
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, Mock
 
-# Mock some functions for testing
-@patch('utils.get_access_token')
-@patch('requests.get')
-def mock_fetch_data_ownr_info_data(self, mock_get_access_token, mock_requests_get):
-    # Simulate successful access token retrieval
-    mock_get_access_token.return_value = 'Bearer some_access_token'
-    # Simulate successful API response
-    mock_requests_get.return_value = MagicMock(status_code=200)
-    return fetch_data_ownr_info_data()
+from your_file import (
+    fetch_data_ownr_info_data,
+    drop_csv_file_to_dropbox,
+    dataframe_wrapper,
+    drop_data_ownr_info_ingestion_file,
+    ingest_data_ownr_info_data,
+)
 
-# Mock some functions for testing
-@patch('os.path.exists')
-@patch('os.mkdir')
-@patch('open', create=True)
-def mock_drop_csv_file_to_dropbox(self, mock_open, mock_mkdir, mock_exists):
-    # Simulate successful folder creation
-    mock_exists.return_value = False
-    mock_mkdir.return_value = None
-    # Simulate successful file opening and writing
-    mock_file = mock_open.return_value
-    mock_file.write.return_value = None
-    return drop_csv_file_to_dropbox(MagicMock(content=b"some_csv_data"), 'DATA_OWNR_INFO')
 
-class TestDataOwnerInfo(unittest.TestCase):
+class TestDOIDataIngestion(unittest.TestCase):
 
-    def test_fetch_data_ownr_info_data_success(self):
-        # Patch the function and call it
-        response = mock_fetch_data_ownr_info_data(self)
-        # Assert successful response with status code 200
-        self.assertEqual(response.status_code, 200)
+    @patch('requests.get')
+    def test_fetch_data_ownr_info_data_success(self, mock_get):
+        # Mock successful response
+        mock_response = Mock()
+        mock_response.content = b'CSV data content'
+        mock_get.return_value = mock_response
 
-    def test_fetch_data_ownr_info_data_error(self):
-        # Patch the function to raise exception during token retrieval
-        with patch('utils.get_access_token', side_effect=Exception('Error getting token')):
-            response = mock_fetch_data_ownr_info_data(self)
-        # Assert error message in response
-        self.assertIn('Error while getting token for catalog', response)
+        response = fetch_data_ownr_info_data()
+        self.assertEqual(response, mock_response.content)
 
-    def test_drop_csv_file_to_dropbox_success(self):
-        # Patch the function and call it
-        result, status_code = mock_drop_csv_file_to_dropbox(self)
-        # Assert successful result and status code
-        self.assertEqual(result[0], "Successfully dropped data file:")
-        self.assertEqual(status_code, 200)
+    @patch('your_file.get_access_token')
+    def test_fetch_data_ownr_info_data_token_error(self, mock_get_token):
+        # Mock access token error
+        mock_get_token.side_effect = Exception('Error getting token')
 
-    def test_drop_csv_file_to_dropbox_error(self):
-        # Patch the function to raise exception during file open
-        with patch('open', side_effect=Exception('Error opening file')):
-            result, status_code = mock_drop_csv_file_to_dropbox(self)
-        # Assert error message in response
-        self.assertIn('File Upload Failed', result[0])
-        self.assertEqual(status_code, 500)
+        with self.assertRaises(Exception) as e:
+            fetch_data_ownr_info_data()
+        self.assertEqual(str(e.exception), 'Error while getting token for catalog with: Error getting token')
 
-# Run the tests
-if __name__ == '__main__':
-    unittest.main()
+    @patch('requests.get')
+    def test_fetch_data_ownr_info_data_api_error(self, mock_get):
+        # Mock API error
+        mock_get.side_effect = Exception('API call failed')
+
+        with self.assertRaises(Exception) as e:
+            fetch_data_ownr_info_data()
+        self.assertEqual(str(e.exception), 'Error while getting data from Catalog API with API call failed')
+
+    @patch('os.path.exists')
+    @patch('os.mkdir')
+    @patch('open')
+    @patch('your_file.drop_file')
+    def test_drop_csv_file_to_dropbox_success(self, mock_drop_file, mock_open, mock_mkdir, mock_exists):
+        # Mock successful upload
+        mock_exists.return_value = False
+        mock_open.return_value = Mock()
+        mock_drop_file.return_value = True
+
+        response = drop_csv_file_to_dropbox(b'CSV content', 'DATA_OWNR_INFO')
+        self.assertTrue(response[0].startswith('Successfully dropped data file'))
+        self.assertEqual(response[1], 200)
+
+    @patch('open')
+    def test_drop_csv_file_to_dropbox_save_error(self, mock_open):
+        # Mock file saving error
+        mock_open.side_effect = Exception('Error saving file')
+
+        with self.assertRaises(Exception) as e:
+            drop_csv_file_to_dropbox(b'CSV content', 'DATA_OWNR_INFO')
+        self.assertEqual(str(e.exception), 'File Upload Failed for (DATA_OWNR_INFO and EXEC_ID ) with Error saving file')
+
+    def test_drop_csv_file_to_dropbox_local_env(self):
+        # No upload in local environment
+        with patch('your_file.drop_file') as mock_drop_file:
+            mock_drop_file.return_value = True
+            response = drop_csv_file_to_dropbox(b'CSV content', 'DATA_OWNR_INFO', ENVIRONMENT='LOCAL')
+            self.assertFalse(mock_drop_file.called)
+            self.assertTrue(response[0].startswith('Successfully dropped data file'))
+            self.assertEqual(response[1], 200)
+
+    def test_dataframe_wrapper(self):
+        # Test column renaming and adding new column
+        df = pd.DataFrame({'   col1  ': [1, 2, 3], 'col2': ['A', 'B', 'C']})
+        expected_df = pd.DataFrame({'APPL_SYS_ID': [1, 2, 3], 'USER_NM': ['A', 'B', 'C']})
+        expected_df['CRE_TS'] = 'mocked_timestamp'  # Assuming mocked value
+
+        result_df = dataframe_wrapper(df.copy())
+
