@@ -60,3 +60,235 @@ def test_ingest_data_ownr_info_data(mock_ingest_df, app):
         response = ingest_data_ownr_info_data()
         assert response == 'Success'
         mock_ingest_df.assert_called_once_with(TABLE_NAME, 'DATA_OWNR_INFO', dataframe_wrapper, HEADER_ROW)
+
+
+
+
+
+
+
+################################################################################################################################
+
+
+import pytest
+import json
+import requests
+import pandas as pd
+from ingestions.bia import product_summary
+
+from unittest.mock import patch, Mock, MagicMock
+
+
+class MockedData:
+    api_result_success = [{}]
+    access_token_success_val = 'assgfjhkhkjlkjhkljl'
+    waiting_files_result = [('test.csv',)]
+
+    raw_record = {
+            "productIdentifier": "2568",
+            "lineOfBusinessName": "Asset & Wealth Management",
+            "lineOfBusinessCode": "AWM",
+            "subLineOfBusinessName": "Asset Management",
+            "subLineOfBusinessCode": "AWM - AM",
+            "productLineName": "Client",
+            "productName": "Reporting and Information Provision",
+            "productDescriptionText": "Watershed Implementation",
+            "createDate": "2022-11-28",
+            "updateDate": "2023-11-06",
+            "endDate": "9999-12-31",
+            "areaProducts": [
+            {
+                    "areaProductIdentifier": "152",
+                    "areaProductName": "Pricing",
+                    "areaProductMembers": [
+                        {
+                            "workerFullName": "Sean Smith",
+                            "standardIdentifier": "U622759",
+                            "userRoleName": "Area Product Owner"
+                        }
+                    ],
+                    "jiraDataSource": {
+                        "projectInstanceIdentifier": 2,
+                        "projectIdentifier": 30801,
+                        "projectKeyIdentifier": "SBC",
+                        "projectNameIdentifier": "Small Business Card",
+                        "projectInstanceNameIdentifier": "CCB - Shared",
+                        "activeProjectIndicator": "true"
+                    }
+                },
+                {
+                    "areaProductIdentifier": "151",
+                    "areaProductName": "Operations and Client Management",
+                    "areaProductMembers": [
+                        {
+                            "workerFullName": "Nadiyah Jones",
+                            "standardIdentifier": "N265740",
+                            "userRoleName": "Area Product Owner"
+                        }
+                    ],
+                    "jiraDataSource": {
+                        "projectInstanceIdentifier": 2,
+                        "projectIdentifier": 30801,
+                        "projectKeyIdentifier": "SBC",
+                        "projectNameIdentifier": "Small Business Card",
+                        "projectInstanceNameIdentifier": "CCB - Shared",
+                        "activeProjectIndicator": "true"
+                    }
+                },
+            ],
+            "productMembers": [
+                {
+                    "workerFullName": "Diane Plavecski",
+                    "standardIdentifier": "O676471",
+                    "userRoleName": "Product Owner"
+                },
+                {
+                    "workerFullName": "Mike Janesch",
+                    "standardIdentifier": "L003024",
+                    "userRoleName": "Tech Partner"
+                }
+            ],
+            "productArchitecture": {}
+        }
+
+    bia_success_resp = {
+        "productSummary" : [raw_record],
+        "page": 
+            {
+                'currentPaginationNumber': 0, 
+                'moreRecordsIndicator': True, 
+                'receivedRecordCount': 1000, 
+                'requestedRecordCount': 1000, 
+                'totalRecordCount': 1056
+            }
+    } 
+    bia_error_resp = None
+
+    response_df = pd.DataFrame({
+    "PROD_ID": ["2568","2568"],
+    "LOB_CD": ["AWM","AWM"],
+    "LOB_NM": ["Asset & Wealth Management","Asset & Wealth Management"],
+    "SUB_LOB": ["Asset Management","Asset Management"],
+    "PROD_LINE": ["Client","Client"],
+    "PROD_NM": ["Reporting and Information Provision","Reporting and Information Provision"],
+    "PROD_DESC": ["Watershed Implementation","Watershed Implementation"],
+    "PROD_OWNR_NM": ["Diane Plavecski","Diane Plavecski"],
+    "PROD_OWNR_SID": ["O676471","O676471"],
+    "TECH_PTNR_NM": ["Mike Janesch","Mike Janesch"],
+    "TECH_PTNR_SID": ["L003024","L003024"],
+    "AREA_PROD_ID": ["152","152"],
+    "AREA_PROD_NM": ["Pricing","Pricing"],
+    "AREA_PROD_OWNR_SID": ["U622759","U622759"],
+    "AREA_PROD_OWNR_NM": ["Sean Smith","Sean Smith"],
+    "PRJCT_ID": [30801,30801],
+    "PRJCT_NM": ["Small Business Card","Small Business Card"],
+    "DATA_SRC_INSTN_ID": [2,2],
+    "DATA_SRC_INSTN_NM": ["CCB - Shared","CCB - Shared"],
+    "PRJCT_KEY_ID": ["SBC","SBC"],
+    "INGS_PROC_EXEC_ID": ["",""],
+    "CRE_TS": ["",""]
+    })
+
+
+class MockRequests:
+
+    def __init__(self, data, status_code):
+        """
+        :param data:
+        :param status_code:
+        """
+        self.json_data = data
+        self.status_code = status_code
+        self.text = json.dumps(data)
+
+    def json(self):
+        """
+        :return:
+        """
+        return self.json_data
+
+
+def test_drop_prod_sum_ingestion_file_with_success_response(client, mocker) -> None:
+    mocker.patch("ingestions.bia.product_summary.fetch_prod_sum_data",
+                 return_value=MockedData.api_result_success)
+    mocker.patch("ingestions.bia.product_summary.drop_source_file_to_dropbox",
+                 return_value=('Success', 200))
+    response = client.get("/drop_prod_sum_ingestion_file")
+    assert response.status_code == 200
+
+
+def test_drop_prod_sum_ingestion_file_with_no_access_token(client, mocker) -> None:
+    mocker.patch("ingestions.bia.product_summary.get_access_token",
+                 side_effect=[requests.exceptions.ConnectTimeout])
+    response = client.get("/drop_prod_sum_ingestion_file")
+    assert response.data.decode(
+        'utf-8') == 'Authorization error while generating token for BIA API'
+
+
+def test_drop_prod_sum_ingestion_file_with_bad_api_response(client, mocker) -> None:
+    mocker.patch("ingestions.bia.product_summary.get_access_token",
+                 return_value=MockedData.access_token_success_val)
+    mocker.patch("requests.get", side_effect=[
+                 requests.exceptions.ConnectTimeout])
+    response = client.get("/drop_prod_sum_ingestion_file")
+    assert response.data.decode(
+        'utf-8') == 'Encountered error while fetching data from product_summary'
+
+
+def test_drop_prod_sum_ingestion_file_with_success_api_response(client, mocker) -> None:
+    mocker.patch("ingestions.bia.product_summary.get_access_token", return_value=MockedData.access_token_success_val)
+    mocker.patch("requests.get",return_value=MockRequests(MockedData.bia_success_resp, 200))
+    mocker.patch("ingestions.bia.product_summary.drop_source_file_to_dropbox", return_value=('Success',200))
+    response = client.get("/drop_prod_sum_ingestion_file")
+    assert response.status_code == 200
+
+
+def test_drop_prod_sum_ingestion_file_with_error_api_response(client, mocker) -> None:
+    mocker.patch("ingestions.bia.product_summary.get_access_token",
+                 return_value=MockedData.access_token_success_val)
+    mocker.patch("requests.get", return_value=MockRequests(
+        MockedData.bia_error_resp, 200))
+    mocker.patch("ingestions.bia.product_summary.drop_source_file_to_dropbox",
+                 return_value=('Success', 200))
+    response = client.get("/drop_prod_sum_ingestion_file")
+    assert response.status_code == 400
+
+
+def test_transform_func_success_response(client, mocker) -> None:
+    record = MockedData.raw_record
+    exec_id = "exec_id"
+    transformed_data = product_summary.transform_prod_sum_rec_to_writable_data(
+        record, exec_id)[0]
+    print(transformed_data)
+    assert transformed_data[0] == record['productIdentifier']
+
+
+def test_transform_func_error_response(client, mocker) -> None:
+    record = MockedData.raw_record
+    exec_id = "exec_id"
+    del record["lineOfBusinessName"]
+    with pytest.raises(KeyError) as e_info:
+        transformed_data = product_summary.transform_prod_sum_rec_to_writable_data(
+            record, exec_id)
+
+
+def test_ingest_prod_sum_data_with_success_response(client, mocker) -> None:
+    mocker.patch(
+        "ingestions.bia.product_summary.ingest_dataframe_to_db", return_value='Success')
+    response = client.get("/ingest_prod_sum_data")
+    assert response.status_code == 200
+
+
+def test_prod_sum_ingestion_file_with_exception(client, mocker) -> None:
+    mocker.patch("ingestions.bia.product_summary.fetch_prod_sum_data",
+                 return_value=MockedData.api_result_success)
+    mocker.patch(
+        "ingestions.bia.product_summary.drop_source_file_to_dropbox", side_effect=KeyError)
+    response = client.get("/drop_prod_sum_ingestion_file")
+    assert response.status_code == 400
+
+def test_dataframe_wraper_success_response(client, mocker) -> None:
+    df = MockedData.response_df 
+    transformed_df = product_summary.dataframe_wrapper(df)
+    assert transformed_df.empty == False
+
